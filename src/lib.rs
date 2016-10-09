@@ -19,6 +19,62 @@ use std::hash::Hash;
 use std::fmt::Debug;
 use time::Duration;
 
+/// A resolution for a wheel in the hierarchy
+///
+/// The tick rate of the wheel must match the highest resolution of the wheel.
+#[derive(Eq, PartialEq, Ord, PartialOrd)]
+pub enum Resolution {
+    Ms,
+    TenMs,
+    HundredMs,
+    Sec,
+    Min,
+    Hour
+}
+
+/// Determine the wheel size for each resolution.
+///
+/// Wheel sizes less than one second are adjusted based on the next lowest resolution so that
+/// resolutions don't overlap.
+pub fn wheel_sizes(resolutions: &mut Vec<Resolution>) -> Vec<usize> {
+    assert!(resolutions.len() > 0);
+    resolutions.sort();
+    resolutions.dedup();
+    let end = resolutions.len() - 1;
+    let mut sizes = Vec::with_capacity(resolutions.len());
+    for i in 0..resolutions.len() {
+        let wheel_size = match resolutions[i] {
+            Resolution::Ms => {
+                if i == end {
+                    1000
+                } else {
+                    match resolutions[i+1] {
+                        Resolution::TenMs => 10,
+                        Resolution::HundredMs => 100,
+                        _ => 1000
+                    }
+                }
+            },
+            Resolution::TenMs => {
+                if i == end {
+                    100
+                } else {
+                    match resolutions[i+1] {
+                        Resolution::HundredMs => 10,
+                        _ => 100
+                    }
+                }
+            },
+            Resolution::HundredMs => 10,
+            Resolution::Sec => 60,
+            Resolution::Min => 60,
+            Resolution::Hour => 24
+        };
+        sizes.push(wheel_size);
+    }
+    sizes
+}
+
 pub trait Wheel<T: Eq + Hash + Debug> {
     fn start(&mut self, key: T, time: Duration);
     fn stop(&mut self, key: T);
