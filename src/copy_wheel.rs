@@ -31,8 +31,8 @@ impl<T: Eq + Hash + Debug + Clone> CopyWheel<T> {
     /// The maximum value of the wheel is its minimum resolution times the number of slots in that
     /// resolution's wheel. For example if the maximum resolution is 1 second then the max timer
     /// that may be represented is 1 minute, since the second wheel always only contains 60 slots.
-    /// If larger timer durations are desired, the user should add another, lower resolution, inner
-    /// wheel. The absolute  maximum timer duration is 1 day.
+    /// If larger timer durations are desired, the user should add another, lower resolution.
+    /// The absolute maximum timer duration is 1 day.
     pub fn new(mut resolutions: Vec<Resolution>) -> CopyWheel<T> {
         let sizes = wheel_sizes(&mut resolutions);
         let indexes = vec![0; sizes.len()];
@@ -92,10 +92,6 @@ impl<T: Eq + Hash + Debug + Clone> CopyWheel<T> {
 
 impl<T: Eq + Hash + Debug + Clone> Wheel<T> for CopyWheel<T> {
     /// Start a timer with the given duration.
-    ///
-    /// It will be rounded to the nearest resolution and put in a slot in that resolution's wheel.
-    /// Note that any timer with a duration over one-hour will silently be rounded down to 1 hour.
-    /// Any timer with a duration less than 10ms will be silently rounded up to 10ms.
     fn start(&mut self, key: T, time: Duration) {
         self.keys.insert(key.clone());
         let _ = self.insert_hours(key, time)

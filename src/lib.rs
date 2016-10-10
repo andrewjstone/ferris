@@ -1,14 +1,28 @@
 //! A hierarchical timer wheel
 //!
-//! There are 3 wheels in the hierarchy, of resolution 10ms, 1s, and 1m. The max timeout length is 1
-//! hour. Any timer scheduled over 1 hour will expire in 1 hour.
+//! The number of wheels in the hierarchy are determined by the number of Resolutions passed into
+//! the concrete constructors `AllocWheel::new()` and `CopyWheel::new()`. The size of each wheel is
+//! automatically determined based on whether certain other resolutions are available. For instance
+//! if a wheel is constructed consisting of `Resolution::TenMs` and `Resolution::HundredMs`, then
+//! the number of slots in the 10 ms wheel will be 10 (10 slots to get to 100ms). However, if
+//! `Resolution::HundredMs` was not used, then `Resolution::TenMs` would have 100 slots (100ms to
+//! get to 1 sec).
+//!
+//! In order for the timer to operate correctly, it must tick at the maximum resolution. For
+//! instance if 10ms and 1s resolutions are used, `expire()` must be called every 10ms.
+//!
+//! The minimum length of a timer is limited by the highest resolution. For instance if 10ms and 1s
+//! resolutions were used, the minimum length of a timer would be 10ms.
+//!
+//! The maximum length of a timer is limited by the lowest resolution. For instance if 10ms, and 1s
+//! resolutions were used, the maximum length of a timer would be 59s.
 //!
 //! There is no migration between wheels. A timer is assigned to a single wheel and is scheduled at
-//! the max resolution of the wheel. E.g. If a timer is scheduled for 1.3s it will be scheduled to
-//! fire 2 second ticks later. This is most useful for coarse grain timers and is more efficient
+//! it's minimum resolution. E.g. If a timer is scheduled for 1.3s it will be scheduled to
+//! fire 2 second ticks later. This is most useful for coarse grain timers, is more efficient
 //! computationally and uses less memory than being more precise. The wheels don't have to keep
-//! track of offsets for the next inner wheel so the timer can be rescheduled when the outer wheel
-//! slot expires. And it doesn't have to actually do the reschedule, saving cpu, and potentially
+//! track of offsets for the next inner wheel for wheel to wheel migration, and thus save memory.
+//! And since the migration ddoesn't actually occur, we save cpu, and potentially
 //! extra allocations.
 
 extern crate time;
@@ -69,10 +83,11 @@ impl<T: Debug + Clone> InnerWheel<T> {
     }
 }
 
-/// Determine the wheel size for each resolution.
-///
-/// Wheel sizes less than one second are adjusted based on the next lowest resolution so that
-/// resolutions don't overlap.
+// Determine the wheel size for each resolution.
+//
+// Wheel sizes less than one second are adjusted based on the next lowest resolution so that
+// resolutions don't overlap.
+#[doc(hidden)]
 pub fn wheel_sizes(resolutions: &mut Vec<Resolution>) -> Vec<usize> {
     assert!(resolutions.len() > 0);
     resolutions.sort();
