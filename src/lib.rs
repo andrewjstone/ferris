@@ -14,6 +14,10 @@
 extern crate time;
 
 mod alloc_wheel;
+mod copy_wheel;
+
+pub use alloc_wheel::AllocWheel;
+pub use copy_wheel::CopyWheel;
 
 use std::hash::Hash;
 use std::fmt::Debug;
@@ -30,6 +34,39 @@ pub enum Resolution {
     Sec,
     Min,
     Hour
+}
+
+pub trait Wheel<T: Eq + Hash + Debug + Clone> {
+    fn start(&mut self, key: T, time: Duration);
+    fn stop(&mut self, key: T);
+    fn expire(&mut self) -> Vec<T>;
+}
+
+/// An entry in a InnerWheel
+#[derive(Debug, Clone)]
+struct Slot<T: Debug + Clone> {
+    pub entries: Vec<T>
+}
+
+impl<T: Debug + Clone> Slot<T> {
+    pub fn new() -> Slot<T> {
+        Slot {
+            entries: Vec::new()
+        }
+    }
+}
+
+/// A wheel at a single resolution
+struct InnerWheel<T: Debug + Clone> {
+    pub slots: Vec<Slot<T>>
+}
+
+impl<T: Debug + Clone> InnerWheel<T> {
+    pub fn new(size: usize) -> InnerWheel<T> {
+        InnerWheel {
+            slots: vec![Slot::new(); size]
+        }
+    }
 }
 
 /// Determine the wheel size for each resolution.
@@ -74,14 +111,6 @@ pub fn wheel_sizes(resolutions: &mut Vec<Resolution>) -> Vec<usize> {
     }
     sizes
 }
-
-pub trait Wheel<T: Eq + Hash + Debug + Clone> {
-    fn start(&mut self, key: T, time: Duration);
-    fn stop(&mut self, key: T);
-    fn expire(&mut self) -> Vec<T>;
-}
-
-pub use alloc_wheel::AllocWheel;
 
 #[cfg(test)]
 mod tests {

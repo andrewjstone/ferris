@@ -1,5 +1,4 @@
 use std::iter::Iterator;
-use std::rc::{Rc, Weak};
 use std::hash::Hash;
 use std::collections::HashSet;
 use std::mem;
@@ -7,24 +6,22 @@ use std::fmt::Debug;
 use time::Duration;
 use super::{InnerWheel, Wheel, Resolution, wheel_sizes};
 
-/// This wheel requires an allocation for each timer as it creates an Rc<T> for its key. This allows
-/// the key to be stored in a global hashset that can be used for O(1) cancel. A `Weak<T>` is stored
-/// in the wheel slot, so that if the timer is cancelled, the memory is de-allocatd. When the expiry
-/// for that slot comes around, an attempt to promote the Weak reference will return `None` and so
-/// it will be ignored when draining the wheel slot. If the timer expires before it is cancelled,
-/// the weak reference can be used to remove the Rc<T> from the HashMap, as well as trigger the user
-/// timeout behavior.
+/// This wheel maintains a copy of the timer key in both the appropriate inner timer wheel slot and
+/// the global hashset. This does not require an allocation for each timer but may use more memory
+/// than an CopyWheel depending upon the size of the keys. When the expiry for a slot occurs, the
+/// global hashmap is checked for the expiring keys. If they are still there it means they are valid
+/// to expire, otherwise they have already been cancelled.
 ///
 /// The minimum duration of a timer is 1 ms.
 /// The maximum duration of a timer is 1 day.
-pub struct AllocWheel<T: Eq + Hash + Debug + Clone> {
+pub struct CopyWheel<T: Eq + Hash + Debug + Clone> {
     resolutions: Vec<Resolution>,
-    keys: HashSet<Rc<T>>,
-    wheels: Vec<InnerWheel<Weak<T>>>,
+    keys: HashSet<T>,
+    wheels: Vec<InnerWheel<T>>,
     slot_indexes: Vec<usize>,
 }
 
-impl<T: Eq + Hash + Debug + Clone> AllocWheel<T> {
+impl<T: Eq + Hash + Debug + Clone> CopyWheel<T> {
 
     /// Create a set of hierarchical inner wheels
     ///
@@ -36,10 +33,10 @@ impl<T: Eq + Hash + Debug + Clone> AllocWheel<T> {
     /// that may be represented is 1 minute, since the second wheel always only contains 60 slots.
     /// If larger timer durations are desired, the user should add another, lower resolution, inner
     /// wheel. The absolute  maximum timer duration is 1 day.
-    pub fn new(mut resolutions: Vec<Resolution>) -> AllocWheel<T> {
+    pub fn new(mut resolutions: Vec<Resolution>) -> CopyWheel<T> {
         let sizes = wheel_sizes(&mut resolutions);
         let indexes = vec![0; sizes.len()];
-        AllocWheel {
+        CopyWheel {
             resolutions: resolutions,
             keys: HashSet::new(),
             wheels: sizes.iter().map(|size| InnerWheel::new(*size)).collect(),
@@ -47,35 +44,35 @@ impl<T: Eq + Hash + Debug + Clone> AllocWheel<T> {
         }
     }
 
-    fn insert_hours(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
+    fn insert_hours(&mut self, key: T, time: Duration) -> Result<(), (T, Duration)> {
         self.insert(key, time, Resolution::Hour, time.num_hours() as usize + 1)
     }
 
-    fn insert_minutes(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
+    fn insert_minutes(&mut self, key: T, time: Duration) -> Result<(), (T, Duration)> {
         self.insert(key, time, Resolution::Min, time.num_minutes() as usize + 1)
     }
 
-    fn insert_seconds(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
+    fn insert_seconds(&mut self, key: T, time: Duration) -> Result<(), (T, Duration)> {
         self.insert(key, time, Resolution::Sec, time.num_seconds() as usize + 1)
     }
 
-    fn insert_hundred_ms(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
+    fn insert_hundred_ms(&mut self, key: T, time: Duration) -> Result<(), (T, Duration)> {
         self.insert(key, time, Resolution::HundredMs, time.num_milliseconds() as usize / 100 + 1)
     }
 
-    fn insert_ten_ms(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
+    fn insert_ten_ms(&mut self, key: T, time: Duration) -> Result<(), (T, Duration)> {
         self.insert(key, time, Resolution::TenMs, time.num_milliseconds()  as usize / 10 + 1)
     }
 
-    fn insert_ms(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
+    fn insert_ms(&mut self, key: T, time: Duration) -> Result<(), (T, Duration)> {
         self.insert(key, time, Resolution::Ms, time.num_milliseconds() as usize + 1)
     }
 
     fn insert(&mut self,
-              key: Weak<T>,
+              key: T,
               time: Duration,
               resolution: Resolution,
-              mut slot: usize) -> Result<(), (Weak<T>, Duration)>
+              mut slot: usize) -> Result<(), (T, Duration)>
     {
         // The slot will always be at least 2 ahead of the current, since we add one in each of the
         // insert_xxx methods
@@ -93,22 +90,20 @@ impl<T: Eq + Hash + Debug + Clone> AllocWheel<T> {
     }
 }
 
-impl<T: Eq + Hash + Debug + Clone> Wheel<T> for AllocWheel<T> {
+impl<T: Eq + Hash + Debug + Clone> Wheel<T> for CopyWheel<T> {
     /// Start a timer with the given duration.
     ///
     /// It will be rounded to the nearest resolution and put in a slot in that resolution's wheel.
     /// Note that any timer with a duration over one-hour will silently be rounded down to 1 hour.
     /// Any timer with a duration less than 10ms will be silently rounded up to 10ms.
     fn start(&mut self, key: T, time: Duration) {
-        let key = Rc::new(key);
-        let weak = Rc::downgrade(&key.clone());
-        self.keys.insert(key);
-        let _ = self.insert_hours(weak, time)
-            .or_else(|(weak, time)| self.insert_minutes(weak, time))
-            .or_else(|(weak, time)| self.insert_seconds(weak, time))
-            .or_else(|(weak, time)| self.insert_hundred_ms(weak, time))
-            .or_else(|(weak, time)| self.insert_ten_ms(weak, time))
-            .or_else(|(weak, time)| self.insert_ms(weak, time));
+        self.keys.insert(key.clone());
+        let _ = self.insert_hours(key, time)
+            .or_else(|(key, time)| self.insert_minutes(key, time))
+            .or_else(|(key, time)| self.insert_seconds(key, time))
+            .or_else(|(key, time)| self.insert_hundred_ms(key, time))
+            .or_else(|(key, time)| self.insert_ten_ms(key, time))
+            .or_else(|(key, time)| self.insert_ms(key, time));
     }
 
     /// Cancel a timer.
@@ -126,15 +121,12 @@ impl<T: Eq + Hash + Debug + Clone> Wheel<T> for AllocWheel<T> {
         for (ref mut wheel, ref mut slot_index) in self.wheels.iter_mut().zip(&mut self.slot_indexes) {
             **slot_index = (**slot_index + 1) % wheel.slots.len();
             expired.extend(wheel.slots[**slot_index].entries.drain(..)
-                           .filter_map(|key| key.upgrade())
-                           .filter(|key| keys.remove(key))
-                           .map(|key| Rc::try_unwrap(key).unwrap()));
+                           .filter(|key| keys.remove(key)));
 
             // We haven't wrapped around to the next wheel
             if **slot_index != 0 {
                 break;
             }
-
         }
 
         // Make keys part of self again
@@ -145,7 +137,6 @@ impl<T: Eq + Hash + Debug + Clone> Wheel<T> for AllocWheel<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Weak;
     use super::*;
     use time::Duration;
     use super::super::{Resolution, Wheel};
@@ -177,7 +168,7 @@ mod tests {
     #[test]
     fn start_and_expire() {
         let (resolutions, times, keys) = values();
-        let mut wheel = AllocWheel::new(resolutions);
+        let mut wheel = CopyWheel::new(resolutions);
         for (key, time) in keys.into_iter().zip(times) {
             wheel.start(key, time);
         }
@@ -187,7 +178,7 @@ mod tests {
     #[test]
     fn start_and_stop_then_expire() {
         let (resolutions, times, keys) = values();
-        let mut wheel = AllocWheel::new(resolutions);
+        let mut wheel = CopyWheel::new(resolutions);
         for (key, time) in keys.clone().into_iter().zip(times) {
             wheel.start(key, time);
         }
@@ -198,7 +189,7 @@ mod tests {
         verify_expire_contains_only_weak_refs(&mut wheel);
     }
 
-    fn verify_wheel_and_slot_position(wheel: &mut AllocWheel<&'static str>) {
+    fn verify_wheel_and_slot_position(wheel: &mut CopyWheel<&'static str>) {
         let (_, _, keys) = values();
         let expected_slots = [6, 4, 2, 6, 6, 6];
         for i in 0..wheel.wheels.len() {
@@ -206,8 +197,7 @@ mod tests {
                 let ref entries = wheel.wheels[i].slots[j].entries;
                 if j == expected_slots[i] {
                     assert_eq!(1, entries.len());
-                    let entry = Weak::upgrade(&entries[0].clone()).unwrap();
-                    assert_eq!(keys[i], *entry);
+                    assert_eq!(keys[i], entries[0]);
                 } else {
                     assert_eq!(0, entries.len());
                 }
@@ -215,7 +205,7 @@ mod tests {
         }
     }
 
-    fn verify_expire_contains_only_weak_refs(wheel: &mut AllocWheel<&'static str>) {
+    fn verify_expire_contains_only_weak_refs(wheel: &mut CopyWheel<&'static str>) {
         // We only go until the 5 minute timer. We expire wheel 0, index 1 first (hence the -1)
         // The 6 is because we always start an extra slot late because the current one is in
         // progress and we don't want to fire early. So the timer will fire between 5 and 6 minutes
@@ -228,7 +218,7 @@ mod tests {
         }
     }
 
-    fn verify_expire(wheel: &mut AllocWheel<&'static str>) {
+    fn verify_expire(wheel: &mut CopyWheel<&'static str>) {
         let (_, _, keys) = values();
         let expected_ticks = [
             5, // We always expire starting at slot 1
@@ -254,3 +244,5 @@ mod tests {
         }
     }
 }
+
+
