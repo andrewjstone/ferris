@@ -1,3 +1,24 @@
+[![Build
+Status](https://travis-ci.org/andrewjstone/ferris.svg?branch=master)](https://travis-ci.org/andrewjstone/amy)
+
+[API Documentation](https://docs.rs/ferris)
+
+### Usage
+
+Add the following to your `Cargo.toml`
+
+```toml
+[dependencies]
+ferris = "0.1"
+```
+
+Add this to your crate root
+
+```rust
+extern crate ferris;
+```
+
+### Description
 Ferris is a hierarchical timer wheel. There are multiple wheels with different resolutions to provide
 a large time range with minimal memory use.
 
