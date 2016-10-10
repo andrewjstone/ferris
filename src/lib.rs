@@ -22,7 +22,7 @@ use time::Duration;
 /// A resolution for a wheel in the hierarchy
 ///
 /// The tick rate of the wheel must match the highest resolution of the wheel.
-#[derive(Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Resolution {
     Ms,
     TenMs,
@@ -75,10 +75,43 @@ pub fn wheel_sizes(resolutions: &mut Vec<Resolution>) -> Vec<usize> {
     sizes
 }
 
-pub trait Wheel<T: Eq + Hash + Debug> {
+pub trait Wheel<T: Eq + Hash + Debug + Clone> {
     fn start(&mut self, key: T, time: Duration);
     fn stop(&mut self, key: T);
     fn expire(&mut self) -> Vec<T>;
 }
 
 pub use alloc_wheel::AllocWheel;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolutions_sorted_and_deduped() {
+        let mut resolutions = vec![Resolution::Sec, Resolution::Min, Resolution::TenMs, Resolution::Min];
+        let _ = wheel_sizes(&mut resolutions);
+        assert_eq!(vec![Resolution::TenMs, Resolution::Sec, Resolution::Min], resolutions);
+    }
+
+    #[test]
+    fn wheel_sizes_correct() {
+        let mut resolutions = vec![
+            vec![Resolution::Ms, Resolution::TenMs, Resolution::Sec],
+            vec![Resolution::Ms, Resolution::HundredMs, Resolution::Sec, Resolution::Min],
+            vec![Resolution::Ms, Resolution::Sec],
+            vec![Resolution::TenMs, Resolution::HundredMs, Resolution::Sec]
+        ];
+
+        let expected = vec![
+            vec![10, 100, 60],
+            vec![100, 10, 60, 60],
+            vec![1000, 60],
+            vec![10, 10, 60]
+        ];
+
+        for (mut r, expected) in resolutions.iter_mut().zip(expected) {
+            assert_eq!(expected, wheel_sizes(&mut r));
+        }
+    }
+}

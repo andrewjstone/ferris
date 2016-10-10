@@ -8,19 +8,28 @@ use time::Duration;
 use super::{Wheel, Resolution, wheel_sizes};
 
 /// An entry in a InnerWheel
-struct Slot<T: Eq + Hash + Debug> {
+#[derive(Debug, Clone)]
+struct Slot<T: Eq + Hash + Debug + Clone> {
     pub entries: Vec<Weak<T>>
 }
 
+impl<T: Eq + Hash + Debug + Clone> Slot<T> {
+    pub fn new() -> Slot<T> {
+        Slot {
+            entries: Vec::new()
+        }
+    }
+}
+
 /// A wheel at a single resolution
-struct InnerWheel<T: Eq + Hash + Debug> {
+struct InnerWheel<T: Eq + Hash + Debug + Clone> {
     pub slots: Vec<Slot<T>>
 }
 
-impl<T: Eq + Hash + Debug> InnerWheel<T> {
+impl<T: Eq + Hash + Debug + Clone> InnerWheel<T> {
     pub fn new(size: usize) -> InnerWheel<T> {
         InnerWheel {
-            slots: Vec::with_capacity(size)
+            slots: vec![Slot::new(); size]
         }
     }
 }
@@ -35,14 +44,14 @@ impl<T: Eq + Hash + Debug> InnerWheel<T> {
 ///
 /// The minimum duration of a timer is 1 ms.
 /// The maximum duration of a timer is 1 day.
-pub struct AllocWheel<T: Eq + Hash + Debug> {
+pub struct AllocWheel<T: Eq + Hash + Debug + Clone> {
     resolutions: Vec<Resolution>,
     keys: HashSet<Rc<T>>,
     wheels: Vec<InnerWheel<T>>,
     slot_indexes: Vec<usize>,
 }
 
-impl<T: Eq + Hash + Debug> AllocWheel<T> {
+impl<T: Eq + Hash + Debug + Clone> AllocWheel<T> {
 
     /// Create a set of hierarchical inner wheels
     ///
@@ -66,42 +75,44 @@ impl<T: Eq + Hash + Debug> AllocWheel<T> {
     }
 
     fn insert_hours(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::Hour, time.num_hours() as usize)
+        self.insert(key, time, Resolution::Hour, time.num_hours() as usize + 1)
     }
 
     fn insert_minutes(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::Min, time.num_minutes() as usize)
+        self.insert(key, time, Resolution::Min, time.num_minutes() as usize + 1)
     }
 
     fn insert_seconds(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::Sec, time.num_seconds() as usize)
+        self.insert(key, time, Resolution::Sec, time.num_seconds() as usize + 1)
     }
 
     fn insert_hundred_ms(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::HundredMs, time.num_milliseconds() as usize / 100)
+        self.insert(key, time, Resolution::HundredMs, time.num_milliseconds() as usize / 100 + 1)
     }
 
     fn insert_ten_ms(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::TenMs, time.num_milliseconds()  as usize / 10)
+        self.insert(key, time, Resolution::TenMs, time.num_milliseconds()  as usize / 10 + 1)
     }
 
     fn insert_ms(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::Ms, time.num_milliseconds() as usize)
+        self.insert(key, time, Resolution::Ms, time.num_milliseconds() as usize + 1)
     }
 
     fn insert(&mut self,
               key: Weak<T>,
               time: Duration,
               resolution: Resolution,
-              mut val: usize) -> Result<(), (Weak<T>, Duration)>
+              mut slot: usize) -> Result<(), (Weak<T>, Duration)>
     {
-        if val == 0 { return Err((key, time)); }
+        // The slot will always be at least 2 ahead of the current, since we add one in each of the
+        // insert_xxx methods
+        if slot == 1 { return Err((key, time)); }
         if let Some(wheel_index) = self.resolutions.iter().rposition(|ref r| **r == resolution) {
-            let max_val = self.wheels[wheel_index].slots.len();
-            if val > max_val {
-                val = max_val
+            let max_slot = self.wheels[wheel_index].slots.len();
+            if slot > max_slot {
+                slot = max_slot
             }
-            let slot_index = (self.slot_indexes[wheel_index] + val as usize) % max_val;
+            let slot_index = (self.slot_indexes[wheel_index] + slot) % max_slot;
             self.wheels[wheel_index].slots[slot_index].entries.push(key);
             return Ok(());
         }
@@ -109,7 +120,7 @@ impl<T: Eq + Hash + Debug> AllocWheel<T> {
     }
 }
 
-impl<T: Eq + Hash + Debug> Wheel<T> for AllocWheel<T> {
+impl<T: Eq + Hash + Debug + Clone> Wheel<T> for AllocWheel<T> {
     /// Start a timer with the given duration.
     ///
     /// It will be rounded to the nearest resolution and put in a slot in that resolution's wheel.
@@ -156,5 +167,117 @@ impl<T: Eq + Hash + Debug> Wheel<T> for AllocWheel<T> {
         // Make keys part of self again
         mem::swap(&mut keys, &mut self.keys);
         expired
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Weak;
+    use super::*;
+    use time::Duration;
+    use super::super::{Resolution, Wheel};
+
+    fn values() -> (Vec<Resolution>, Vec<Duration>, Vec<&'static str>) {
+        let resolutions = vec![
+            Resolution::Ms,
+            Resolution::TenMs,
+            Resolution::HundredMs,
+            Resolution::Sec,
+            Resolution::Min,
+            Resolution::Hour
+        ];
+
+        let times = vec![
+            Duration::milliseconds(5),
+            Duration::milliseconds(35),
+            Duration::milliseconds(150),
+            Duration::seconds(5) + Duration::milliseconds(10),
+            Duration::minutes(5) + Duration::seconds(10),
+            Duration::hours(5) + Duration::seconds(10)
+        ];
+
+        let keys = vec!["a", "b", "c", "d", "e", "f"];
+
+        (resolutions, times, keys)
+    }
+
+    #[test]
+    fn start_and_expire() {
+        let (resolutions, times, keys) = values();
+        let mut wheel = AllocWheel::new(resolutions);
+        for (key, time) in keys.into_iter().zip(times) {
+            wheel.start(key, time);
+        }
+        verify_expire(&mut wheel);
+    }
+
+    #[test]
+    fn start_and_stop_then_expire() {
+        let (resolutions, times, keys) = values();
+        let mut wheel = AllocWheel::new(resolutions);
+        for (key, time) in keys.clone().into_iter().zip(times) {
+            wheel.start(key, time);
+        }
+        verify_wheel_and_slot_position(&mut wheel);
+        for key in keys {
+            wheel.stop(key);
+        }
+        verify_expire_contains_only_weak_refs(&mut wheel);
+    }
+
+    fn verify_wheel_and_slot_position(wheel: &mut AllocWheel<&'static str>) {
+        let (_, _, keys) = values();
+        let expected_slots = [6, 4, 2, 6, 6, 6];
+        for i in 0..wheel.wheels.len() {
+            for j in 0..wheel.wheels[i].slots.len() {
+                let ref entries = wheel.wheels[i].slots[j].entries;
+                if j == expected_slots[i] {
+                    assert_eq!(1, entries.len());
+                    let entry = Weak::upgrade(&entries[0].clone()).unwrap();
+                    assert_eq!(keys[i], *entry);
+                } else {
+                    assert_eq!(0, entries.len());
+                }
+            }
+        }
+    }
+
+    fn verify_expire_contains_only_weak_refs(wheel: &mut AllocWheel<&'static str>) {
+        // We only go until the 5 minute timer. We expire wheel 0, index 1 first (hence the -1)
+        // The 6 is because we always start an extra slot late because the current one is in
+        // progress and we don't want to fire early. So the timer will fire between 5 and 6 minutes
+        // in a normal program depending upon current slot positions in the wheels
+        let total_ticks = 6*60000 - 1;
+
+        for _ in 0..total_ticks {
+            let expired = wheel.expire();
+            assert_eq!(0, expired.len());
+        }
+    }
+
+    fn verify_expire(wheel: &mut AllocWheel<&'static str>) {
+        let (_, _, keys) = values();
+        let expected_ticks = [
+            5, // We always expire starting at slot 1
+            4 * 10 - 1, // 4 x 10 ms ticks
+            2 * 100 - 1, // 2 x 10 ms ticks x 10 10ms ticks
+            6 * 1000 - 1, // 6 x 10 ms ticks * 10 10ms ticks x 10 100ms ticks = 6 * 1 second,
+            6 * 60000 - 1, // 6 * 60 seconds (60000 ms) = 6 * 1 minute
+
+            // Skip the last one since it makes the test run for too long
+            // 6 * 60 * 60000 - 1 // 6 * 60 minutes
+        ];
+
+        let mut match_count = 0;
+        for i in 0..expected_ticks[4] {
+            let expired = wheel.expire();
+            if expected_ticks.contains(&i) {
+                assert_eq!(1, expired.len());
+                assert_eq!(keys[match_count], expired[0]);
+                match_count = match_count + 1;
+            } else  {
+                assert_eq!(0, expired.len());
+            }
+        }
     }
 }
