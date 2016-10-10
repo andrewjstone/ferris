@@ -1,5 +1,5 @@
 [![Build
-Status](https://travis-ci.org/andrewjstone/ferris.svg?branch=master)](https://travis-ci.org/andrewjstone/amy)
+Status](https://travis-ci.org/andrewjstone/ferris.svg?branch=master)](https://travis-ci.org/andrewjstone/ferris)
 
 [API Documentation](https://docs.rs/ferris)
 
