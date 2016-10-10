@@ -25,7 +25,7 @@ different resolutions to provide a large time range with minimal memory use.
 There is an [allocating
 wheel](https://github.com/andrewjstone/ferris/blob/master/src/alloc_wheel.rs) that allocates each
 timer on the heap and a [copying
-wheel](https://github.com/andrewjstone/ferris/blob/master/src/copy_wheel.rs] that doesn't. Which one
+wheel](https://github.com/andrewjstone/ferris/blob/master/src/copy_wheel.rs) that doesn't. Which one
 you use is simply a matter of preference and benchmarking in your specific application.
 
 Start and Stop are O(1) operations. Expiry is O(n) on the number of elements in the slot.
