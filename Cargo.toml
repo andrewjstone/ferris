@@ -1,6 +1,6 @@
 [package]
 name = "ferris"
-version = "0.1.1"
+version = "0.2.0"
 description = "Hierarchical timer wheel"
 authors = ["Andrew J. Stone <andrew.j.stone.1@gmail.com>"]
 repository = "https://github.com/andrewjstone/ferris"
