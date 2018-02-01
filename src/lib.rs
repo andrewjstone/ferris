@@ -25,8 +25,6 @@
 //! And since the migration ddoesn't actually occur, we save cpu, and potentially
 //! extra allocations.
 
-extern crate time;
-
 mod alloc_wheel;
 mod copy_wheel;
 
@@ -35,7 +33,7 @@ pub use copy_wheel::CopyWheel;
 
 use std::hash::Hash;
 use std::fmt::Debug;
-use time::Duration;
+use std::time::Duration;
 
 /// A resolution for a wheel in the hierarchy
 ///

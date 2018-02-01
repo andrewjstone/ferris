@@ -8,4 +8,3 @@ keywords = ["timer", "wheel"]
 license = "Apache-2.0"
 
 [dependencies]
-time = "0.1"
