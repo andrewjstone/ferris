@@ -4,7 +4,7 @@ use std::hash::Hash;
 use std::collections::HashSet;
 use std::mem;
 use std::fmt::Debug;
-use time::Duration;
+use std::time::Duration;
 use super::{InnerWheel, Wheel, Resolution, wheel_sizes};
 
 /// This wheel requires an allocation for each timer as it creates an Rc<T> for its key. This allows
@@ -48,27 +48,32 @@ impl<T: Eq + Hash + Debug + Clone> AllocWheel<T> {
     }
 
     fn insert_hours(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::Hour, time.num_hours() as usize + 1)
+        let slot = time.as_secs()/3600;
+        self.insert(key, time, Resolution::Hour, slot as usize + 1)
     }
 
     fn insert_minutes(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::Min, time.num_minutes() as usize + 1)
+        let slot = time.as_secs()/60;
+        self.insert(key, time, Resolution::Min, slot as usize + 1)
     }
 
     fn insert_seconds(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::Sec, time.num_seconds() as usize + 1)
+        self.insert(key, time, Resolution::Sec, time.as_secs() as usize + 1)
     }
 
     fn insert_hundred_ms(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::HundredMs, time.num_milliseconds() as usize / 100 + 1)
+        let slot = time.subsec_nanos()/(1000*1000*100);
+        self.insert(key, time, Resolution::HundredMs, slot as usize + 1)
     }
 
     fn insert_ten_ms(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::TenMs, time.num_milliseconds()  as usize / 10 + 1)
+        let slot = time.subsec_nanos()/(1000*1000*10);
+        self.insert(key, time, Resolution::TenMs, slot  as usize + 1)
     }
 
     fn insert_ms(&mut self, key: Weak<T>, time: Duration) -> Result<(), (Weak<T>, Duration)> {
-        self.insert(key, time, Resolution::Ms, time.num_milliseconds() as usize + 1)
+        let slot = time.subsec_nanos()/(1000*1000);
+        self.insert(key, time, Resolution::Ms, slot as usize + 1)
     }
 
     fn insert(&mut self,
@@ -143,7 +148,7 @@ impl<T: Eq + Hash + Debug + Clone> Wheel<T> for AllocWheel<T> {
 mod tests {
     use std::rc::Weak;
     use super::*;
-    use time::Duration;
+    use std::time::Duration;
     use super::super::{Resolution, Wheel};
 
     fn values() -> (Vec<Resolution>, Vec<Duration>, Vec<&'static str>) {
@@ -157,12 +162,12 @@ mod tests {
         ];
 
         let times = vec![
-            Duration::milliseconds(5),
-            Duration::milliseconds(35),
-            Duration::milliseconds(150),
-            Duration::seconds(5) + Duration::milliseconds(10),
-            Duration::minutes(5) + Duration::seconds(10),
-            Duration::hours(5) + Duration::seconds(10)
+            Duration::from_millis(5),
+            Duration::from_millis(35),
+            Duration::from_millis(150),
+            Duration::from_secs(5) + Duration::from_millis(10),
+            Duration::from_secs(5*60) + Duration::from_secs(10),
+            Duration::from_secs(5*3600) + Duration::from_secs(10)
         ];
 
         let keys = vec!["a", "b", "c", "d", "e", "f"];
